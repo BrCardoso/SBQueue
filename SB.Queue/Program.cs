@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Azure.ServiceBus;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -14,6 +15,8 @@ namespace SB.Queue
         const string QueueConnectionString = "Endpoint=sb://geekburguer.servicebus.windows.net/;SharedAccessKeyName=ProductPolicy;SharedAccessKey=ezoK2lia5PYDvqdOyujhPZq9NEGjmC9evU0vloWY/0Y=";
         const string QueuePath = "ProductsAvailableForUser";
         static IQueueClient _queueClient;
+        public static List<Task> PendingCompleteTasks;
+        public static int count { get; private set; }
 
         public static void Main(string[] args)
         {
@@ -54,6 +57,7 @@ namespace SB.Queue
             await closeTask;
             CheckCommunicationExceptions(closeTask);
         }
+
         public static bool CheckCommunicationExceptions(Task task)
         {
             if (task.Exception == null || task.Exception.InnerExceptions.Count == 0) return true;
@@ -69,15 +73,6 @@ namespace SB.Queue
             return false;
         }
 
-
-        private static async Task ReceiveMessagesAsync()
-        {
-            _queueClient = new QueueClient(QueueConnectionString, QueuePath);
-            _queueClient.RegisterMessageHandler(MessageHandler,
-                new MessageHandlerOptions(ExceptionHandler) { AutoComplete = false });
-            Console.ReadLine();
-            await _queueClient.CloseAsync();
-        }
         private static Task ExceptionHandler(ExceptionReceivedEventArgs exceptionArgs)
         {
             Console.WriteLine($"Message handler encountered an exception {exceptionArgs.Exception}.");
@@ -88,8 +83,36 @@ namespace SB.Queue
 
         private static async Task MessageHandler(Message message, CancellationToken cancellationToken)
         {
-            Console.WriteLine($"Received message: { Encoding.UTF8.GetString(message.Body)}");
-            await _queueClient.CompleteAsync(message.SystemProperties.LockToken);
+            Console.WriteLine($"Received message{ Encoding.UTF8.GetString(message.Body)}");
+
+            if (cancellationToken.IsCancellationRequested || _queueClient.IsClosedOrClosing)
+                return;
+
+            Console.WriteLine($"task {count++}");
+            Task PendingTask;
+            lock (PendingCompleteTasks)
+            {
+                PendingCompleteTasks.Add(_queueClient.CompleteAsync(message.SystemProperties.LockToken));
+                PendingTask = PendingCompleteTasks.LastOrDefault();
+            }
+            Console.WriteLine($"calling complete for task {count}");
+            await PendingTask;
+            Console.WriteLine($"remove task {count} from task queue");
+            PendingCompleteTasks.Remove(PendingTask);
+        }
+
+        private static async Task ReceiveMessagesAsync()
+        {
+            _queueClient = new QueueClient(QueueConnectionString,
+                 QueuePath, ReceiveMode.PeekLock);
+            _queueClient.RegisterMessageHandler(MessageHandler, new MessageHandlerOptions(ExceptionHandler) { AutoComplete = false });
+            Console.ReadLine();
+            Console.WriteLine($" Request to close async. Pending tasks: { PendingCompleteTasks.Count}");
+            await Task.WhenAll(PendingCompleteTasks);
+            Console.WriteLine($"All pending tasks were completed");
+            var closeTask = _queueClient.CloseAsync();
+            await closeTask;
+            CheckCommunicationExceptions(closeTask);
         }
 
 
