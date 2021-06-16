@@ -13,9 +13,9 @@ namespace SB.Queue
     public class Program
     {
         const string QueueConnectionString = "Endpoint=sb://geekburguer.servicebus.windows.net/;SharedAccessKeyName=ProductPolicy;SharedAccessKey=ezoK2lia5PYDvqdOyujhPZq9NEGjmC9evU0vloWY/0Y=";
-        const string QueuePath = "ProductsAvailableForUser";
+        const string QueuePath = "productchanged";
         static IQueueClient _queueClient;
-        public static List<Task> PendingCompleteTasks;
+        public static List<Task> PendingCompleteTasks = new List<Task>();
         public static int count { get; private set; }
 
         public static void Main(string[] args)
@@ -39,9 +39,9 @@ namespace SB.Queue
 
         private static async Task SendMessagesAsync()
         {
-            var queueClient = new QueueClient(QueueConnectionString,
+            _queueClient = new QueueClient(QueueConnectionString,
                    QueuePath);
-            queueClient.OperationTimeout = TimeSpan.FromSeconds(10);
+            _queueClient.OperationTimeout = TimeSpan.FromSeconds(10);
             var messages = " Hi,Hello,Hey,How are you,Be Welcome"
                 .Split(',')
                 .Select(msg =>
@@ -50,7 +50,7 @@ namespace SB.Queue
                     return new Message(Encoding.UTF8.GetBytes(msg));
                 })
                 .ToList();
-            var sendTask = queueClient.SendAsync(messages);
+            var sendTask = _queueClient.SendAsync(messages);
             await sendTask;
             CheckCommunicationExceptions(sendTask);
             var closeTask = _queueClient.CloseAsync();
